@@ -28,7 +28,7 @@ def parse_list(texto):
     try:
         valor = ast.literal_eval(texto)
         if isinstance(valor, list):
-            return " ".join(valor)   # vira "Action Drama Fantasy"
+            return " ".join(valor)   
         return str(texto)
     except:
         return str(texto)
@@ -45,11 +45,9 @@ print("Formato original:", df.shape)
 df['genres'] = df['genres'].apply(parse_list)
 df['studios'] = df['studios'].apply(parse_list)
 
-# Manter apenas colunas úteis
 df = df[['score', 'episodes', 'members', 'year', 'genres', 'studios']]
 df = df.dropna()
 
-# One-hot encoding
 df = pd.get_dummies(df, columns=['genres', 'studios'])
 
 print("Formato após processamento:", df.shape)
@@ -69,7 +67,7 @@ scaler_X = MinMaxScaler()
 X = scaler_X.fit_transform(X)
 
 scaler_y = MinMaxScaler()
-y = scaler_y.fit_transform(y.reshape(-1, 1)).flatten()  # Normalizar y para 0-1
+y = scaler_y.fit_transform(y.reshape(-1, 1)).flatten()  
 
 # =====================================================
 # 5) TREINO / TESTE
@@ -87,7 +85,7 @@ model.add(Dropout(0.2))
 model.add(Dense(64, activation='relu'))
 model.add(Dropout(0.2))
 model.add(Dense(32, activation='relu'))
-model.add(Dense(1, activation='linear'))  # saída contínua
+model.add(Dense(1, activation='linear'))  
 
 model.compile(
     loss='mse',
@@ -98,12 +96,12 @@ model.compile(
 print(model.summary())
 
 # =====================================================
-# 7) TREINAMENTO (mais epochs)
+# 7) TREINAMENTO 
 # =====================================================
 history = model.fit(
     X_train,
     y_train,
-    epochs=200,  # Aumentado
+    epochs=200,  
     batch_size=32,
     validation_split=0.2,
     verbose=1
@@ -127,7 +125,6 @@ plt.close()
 # =====================================================
 pred = model.predict(X_test).flatten()
 
-# Desnormalizar predições para comparar com y_test original
 pred_desnorm = scaler_y.inverse_transform(pred.reshape(-1, 1)).flatten()
 y_test_desnorm = scaler_y.inverse_transform(y_test.reshape(-1, 1)).flatten()
 
@@ -171,7 +168,6 @@ def prever_score_terminal():
     scaler_y = joblib.load("resultados/scaler_y.joblib")
     labels_X = joblib.load("resultados/labels_X.joblib")
 
-    # Cria vetor final 100% zerado no mesmo formato do treino
     vetor = {col: 0 for col in labels_X}
 
     # =================== VALORES NUMÉRICOS ===================
@@ -197,7 +193,7 @@ def prever_score_terminal():
         for col in labels_X:
             if col.startswith("genres_"):
                 nome = col.replace("genres_", "").lower()
-                if g == nome:  # Correspondência exata
+                if g == nome:  
                     vetor[col] = 1
                     generos_setados.append(col.replace("genres_", ""))
                     matched = True
@@ -234,13 +230,10 @@ def prever_score_terminal():
     # =================== Montar vetor final na ordem correta ===================
     vetor_lista = np.array([[vetor[col] for col in labels_X]])
 
-    # Normalizar X
     vetor_lista = scaler_X.transform(vetor_lista)
 
-    # Predição (normalizada)
     pred_norm = model.predict(vetor_lista).flatten()[0]
 
-    # Desnormalizar para score real
     pred = scaler_y.inverse_transform(np.array([[pred_norm]])).flatten()[0]
 
     print("\n===== RESULTADO =====")
