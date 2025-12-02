@@ -10,10 +10,10 @@ import ast
 
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense
+from tensorflow.keras.layers import Dense, Dropout
 
 # =====================================================
 # 0) CRIAR PASTA DE SAÍDA
@@ -63,10 +63,13 @@ colunas_X = X.columns.tolist()
 X = X.values
 
 # =====================================================
-# 4) NORMALIZAR
+# 4) NORMALIZAR X e y
 # =====================================================
-scaler = MinMaxScaler()
-X = scaler.fit_transform(X)
+scaler_X = MinMaxScaler()
+X = scaler_X.fit_transform(X)
+
+scaler_y = MinMaxScaler()
+y = scaler_y.fit_transform(y.reshape(-1, 1)).flatten()  # Normalizar y para 0-1
 
 # =====================================================
 # 5) TREINO / TESTE
@@ -76,11 +79,13 @@ X_train, X_test, y_train, y_test = train_test_split(
 )
 
 # =====================================================
-# 6) MODELO MLP
+# 6) MODELO MLP (com dropout)
 # =====================================================
 model = Sequential()
 model.add(Dense(128, activation='relu', input_shape=(X.shape[1],)))
+model.add(Dropout(0.2))
 model.add(Dense(64, activation='relu'))
+model.add(Dropout(0.2))
 model.add(Dense(32, activation='relu'))
 model.add(Dense(1, activation='linear'))  # saída contínua
 
@@ -93,12 +98,12 @@ model.compile(
 print(model.summary())
 
 # =====================================================
-# 7) TREINAMENTO
+# 7) TREINAMENTO (mais epochs)
 # =====================================================
 history = model.fit(
     X_train,
     y_train,
-    epochs=120,
+    epochs=200,  # Aumentado
     batch_size=32,
     validation_split=0.2,
     verbose=1
@@ -122,17 +127,23 @@ plt.close()
 # =====================================================
 pred = model.predict(X_test).flatten()
 
-mse = mean_squared_error(y_test, pred)
-r2 = r2_score(y_test, pred)
+# Desnormalizar predições para comparar com y_test original
+pred_desnorm = scaler_y.inverse_transform(pred.reshape(-1, 1)).flatten()
+y_test_desnorm = scaler_y.inverse_transform(y_test.reshape(-1, 1)).flatten()
+
+mse = mean_squared_error(y_test_desnorm, pred_desnorm)
+r2 = r2_score(y_test_desnorm, pred_desnorm)
+mae = mean_absolute_error(y_test_desnorm, pred_desnorm)
 
 print(f"MSE: {mse:.4f}")
 print(f"R²:  {r2:.4f}")
+print(f"MAE: {mae:.4f}")
 
 # =====================================================
 # 10) GRÁFICO REAL vs PREDITO
 # =====================================================
 plt.figure(figsize=(6,6))
-plt.scatter(y_test, pred, s=10)
+plt.scatter(y_test_desnorm, pred_desnorm, s=10)
 plt.xlabel("Score real")
 plt.ylabel("Score predito")
 plt.title("Real vs Predito")
@@ -140,13 +151,14 @@ plt.savefig("resultados/real_vs_predito.png", dpi=300)
 plt.close()
 
 # =====================================================
-# 11) SALVAR MODELO E SCALER
+# 11) SALVAR MODELO E SCALERS
 # =====================================================
 model.save("resultados/modelo_prever_score.h5")
-joblib.dump(scaler, "resultados/scaler_score.joblib")
+joblib.dump(scaler_X, "resultados/scaler_X.joblib")
+joblib.dump(scaler_y, "resultados/scaler_y.joblib")
 joblib.dump(colunas_X, "resultados/labels_X.joblib")
 
-print("\nModelo e scaler salvos na pasta 'resultados/'")
+print("\nModelo e scalers salvos na pasta 'resultados/'")
 
 # =====================================================
 # 12) TESTE MANUAL (MENU INTERATIVO)
@@ -155,84 +167,86 @@ def prever_score_terminal():
 
     print("\n==== TESTE MANUAL DE PREDIÇÃO DO SCORE ====\n")
 
-    # carregar scaler e labels
-    scaler = joblib.load("resultados/scaler_score.joblib")
+    scaler_X = joblib.load("resultados/scaler_X.joblib")
+    scaler_y = joblib.load("resultados/scaler_y.joblib")
     labels_X = joblib.load("resultados/labels_X.joblib")
 
-    # separar grupos de colunas
-    colunas_numericas = []
-    colunas_genres = []
-    colunas_studios = []
+    # Cria vetor final 100% zerado no mesmo formato do treino
+    vetor = {col: 0 for col in labels_X}
 
+    # =================== VALORES NUMÉRICOS ===================
+    print("\nDigite valores numéricos:\n")
     for col in labels_X:
-        if col.startswith("genres_"):
-            colunas_genres.append(col)
-        elif col.startswith("studios_"):
-            colunas_studios.append(col)
-        else:
-            colunas_numericas.append(col)
+        if col in ["episodes", "members", "year"]:
+            while True:
+                try:
+                    v = float(input(f"{col}: "))
+                    vetor[col] = v
+                    break
+                except:
+                    print("Valor inválido.")
 
-    valores = []
+    # =================== GÊNEROS POR TEXTO ===================
+    print("\nDigite os gêneros separados por vírgula (ex: action, romance, comedy)")
+    entrada_generos = input("Gêneros: ").strip().lower()
+    generos_usuario = [g.strip() for g in entrada_generos.split(",") if g.strip()]
 
-    # ====================== NUMÉRICOS ======================
-    print("\nDigite os valores numéricos:\n")
-    for col in colunas_numericas:
-        while True:
-            try:
-                v = float(input(f"{col}: "))
-                valores.append(v)
-                break
-            except:
-                print("Valor inválido.")
+    generos_setados = []
+    for g in generos_usuario:
+        matched = False
+        for col in labels_X:
+            if col.startswith("genres_"):
+                nome = col.replace("genres_", "").lower()
+                if g == nome:  # Correspondência exata
+                    vetor[col] = 1
+                    generos_setados.append(col.replace("genres_", ""))
+                    matched = True
+                    break
+        if not matched:
+            print(f"Gênero '{g}' não encontrado. Ignorado.")
 
-    # ====================== GÊNEROS ======================
-    print("\n=== GÊNEROS DISPONÍVEIS ===")
-    for i, col in enumerate(colunas_genres):
-        print(f"{i+1}. {col.replace('genres_', '')}")
+    print(f"Gêneros setados: {', '.join(generos_setados) if generos_setados else 'Nenhum'}")
 
-    entrada = input("\nEscolha os gêneros (ex: 1,4,7): ")
-    vetor_genres = [0]*len(colunas_genres)
+    # =================== ESTÚDIOS POR MENU ===================
+    colunas_studios = [c for c in labels_X if c.startswith("studios_")]
 
-    if entrada.strip():
-        try:
-            indices = [int(x)-1 for x in entrada.split(",")]
-            for idx in indices:
-                if 0 <= idx < len(vetor_genres):
-                    vetor_genres[idx] = 1
-        except:
-            pass
-
-    valores.extend(vetor_genres)
-
-    # ====================== ESTÚDIOS ======================
     print("\n=== ESTÚDIOS DISPONÍVEIS ===")
     for i, col in enumerate(colunas_studios):
         print(f"{i+1}. {col.replace('studios_', '')}")
 
-    entrada = input("\nEscolha o(s) estúdio(s) (ex: 2,5): ")
-    vetor_studios = [0]*len(colunas_studios)
+    escolha = input("\nEscolha o(s) estúdio(s) (ex: 1,4): ").strip()
 
-    if entrada.strip():
+    studios_setados = []
+    if escolha:
         try:
-            indices = [int(x)-1 for x in entrada.split(",")]
+            indices = [int(x.strip()) - 1 for x in escolha.split(",")]
             for idx in indices:
-                if 0 <= idx < len(vetor_studios):
-                    vetor_studios[idx] = 1
+                if 0 <= idx < len(colunas_studios):
+                    vetor[colunas_studios[idx]] = 1
+                    studios_setados.append(colunas_studios[idx].replace("studios_", ""))
+                else:
+                    print(f"Índice {idx+1} inválido. Ignorado.")
         except:
-            pass
+            print("Entrada inválida para estúdios.")
 
-    valores.extend(vetor_studios)
+    print(f"Estúdios setados: {', '.join(studios_setados) if studios_setados else 'Nenhum'}")
 
-    # Montar vetor final
-    vetor_final = np.array([valores])
-    vetor_final = scaler.transform(vetor_final)
+    # =================== Montar vetor final na ordem correta ===================
+    vetor_lista = np.array([[vetor[col] for col in labels_X]])
 
-    predicted = model.predict(vetor_final).flatten()[0]
+    # Normalizar X
+    vetor_lista = scaler_X.transform(vetor_lista)
+
+    # Predição (normalizada)
+    pred_norm = model.predict(vetor_lista).flatten()[0]
+
+    # Desnormalizar para score real
+    pred = scaler_y.inverse_transform(np.array([[pred_norm]])).flatten()[0]
 
     print("\n===== RESULTADO =====")
-    print(f"Score previsto: {predicted:.2f}\n")
+    print(f"Score previsto: {pred:.2f}")
 
-    return predicted
+    return pred
 
 # =====================================================
 # 13) EXECUTAR TESTE MANUAL
